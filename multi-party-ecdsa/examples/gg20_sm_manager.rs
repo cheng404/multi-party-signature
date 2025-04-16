@@ -180,7 +180,12 @@ struct IssuedUniqueIdx {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let figment = rocket::Config::figment().merge((
+    let figment = rocket::Config::figment()
+    .merge((
+        "address",
+        "0.0.0.0",
+    ))
+    .merge((
         "limits",
         rocket::data::Limits::new().limit("string", 100.megabytes()),
     ));
