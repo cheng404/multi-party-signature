@@ -18,9 +18,13 @@
 #![allow(clippy::too_many_arguments)]
 #![allow(clippy::type_complexity)]
 
+pub mod gg_2020;
+#[deprecated(note = "Use top-level protocol namespace (eg: gg_2020)")]
 pub mod protocols;
 pub mod utilities;
 use std::fmt;
+
+pub use gg_2020::state_machine::traits::MessageRoundID;
 
 #[derive(Copy, PartialEq, Eq, Clone, Debug)]
 pub enum Error {

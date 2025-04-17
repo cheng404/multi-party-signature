@@ -1,5 +1,6 @@
 #![allow(non_snake_case)]
 
+use crate::protocols::multi_party_ecdsa::gg_2020::VerifiableSS;
 /*
     Multi-party ECDSA
 
@@ -15,27 +16,35 @@
 
     @license GPL-3.0+ <https://github.com/KZen-networks/multi-party-ecdsa/blob/master/LICENSE>
 */
-use crate::protocols::multi_party_ecdsa::gg_2020::blame::{
-    GlobalStatePhase5, GlobalStatePhase6, GlobalStatePhase7, LocalStatePhase5, LocalStatePhase6,
+use crate::{
+    protocols::multi_party_ecdsa::gg_2020::{
+        blame::{
+            GlobalStatePhase5, GlobalStatePhase6, GlobalStatePhase7,
+            LocalStatePhase5, LocalStatePhase6,
+        },
+        party_i::{
+            KeyGenBroadcastMessage1, KeyGenDecommitMessage1, Keys,
+            LocalSignature, Parameters, SharedKeys, SignKeys, SignatureRecid,
+        },
+    },
+    utilities::mta::{MessageA, MessageB},
 };
-use crate::protocols::multi_party_ecdsa::gg_2020::party_i::SignatureRecid;
-use crate::protocols::multi_party_ecdsa::gg_2020::party_i::{
-    KeyGenBroadcastMessage1, KeyGenDecommitMessage1, Keys, LocalSignature, Parameters, SharedKeys,
-    SignKeys,
-};
-use crate::utilities::mta::{MessageA, MessageB};
 use curv::arithmetic::traits::Converter;
 
-use crate::protocols::multi_party_ecdsa::gg_2020::ErrorType;
-use crate::utilities::zk_pdl_with_slack::PDLwSlackProof;
-use curv::cryptographic_primitives::hashing::{Digest, DigestExt};
-use curv::cryptographic_primitives::proofs::sigma_dlog::DLogProof;
-use curv::cryptographic_primitives::proofs::sigma_valid_pedersen::PedersenProof;
-use curv::cryptographic_primitives::secret_sharing::feldman_vss::VerifiableSS;
-use curv::elliptic::curves::{secp256_k1::Secp256k1, Point, Scalar};
+use crate::{
+    protocols::multi_party_ecdsa::gg_2020::ErrorType,
+    utilities::zk_composite_dlog::CompositeDLogStatement,
+    utilities::zk_pdl_with_slack::PDLwSlackProof,
+};
+use curv::{
+    cryptographic_primitives::{
+        hashing::{Digest, DigestExt},
+        proofs::{sigma_dlog::DLogProof, sigma_valid_pedersen::PedersenProof},
+    },
+    elliptic::curves::{secp256_k1::Secp256k1, Point, Scalar},
+};
 use paillier::*;
 use sha2::Sha256;
-use zk_paillier::zkproofs::DLogStatement;
 
 #[test]
 fn test_keygen_t1_n2() {
@@ -70,60 +79,60 @@ fn test_sign_n8_t4_ttag6() {
 #[test]
 fn test_sign_n2_t1_ttag1_corrupt_step5_party1() {
     let res = sign(1, 2, 2, vec![0, 1], 5, &[0]);
-    assert!(res.err().unwrap().bad_actors[..] == [0])
+    assert!(&res.err().unwrap().bad_actors[..] == &[0])
 }
 
 // party 2 is corrupting step 5
 #[test]
 fn test_sign_n2_t1_ttag1_corrupt_step5_party2() {
     let res = sign(1, 2, 2, vec![0, 1], 5, &[1]);
-    assert!(res.err().unwrap().bad_actors[..] == [1])
+    assert!(&res.err().unwrap().bad_actors[..] == &[1])
 }
 
 // both parties are corrupting step 5
 #[test]
 fn test_sign_n2_t1_ttag1_corrupt_step5_party12() {
     let res = sign(1, 2, 2, vec![0, 1], 5, &[0, 1]);
-    assert!(res.err().unwrap().bad_actors[..] == [0, 1])
+    assert!(&res.err().unwrap().bad_actors[..] == &[0, 1])
 }
 // party 1 is corrupted
 #[test]
 fn test_sign_n5_t2_ttag4_corrupt_step5_party1() {
     let res = sign(2, 5, 4, vec![0, 2, 3, 4], 5, &[0]);
-    assert!(res.err().unwrap().bad_actors[..] == [0])
+    assert!(&res.err().unwrap().bad_actors[..] == &[0])
 }
 
 // party 1,4 are corrupted
 #[test]
 fn test_sign_n5_t2_ttag4_corrupt_step5_party14() {
     let res = sign(2, 5, 4, vec![0, 2, 3, 4], 5, &[0, 3]);
-    assert!(res.err().unwrap().bad_actors[..] == [0, 3])
+    assert!(&res.err().unwrap().bad_actors[..] == &[0, 3])
 }
 
 // party 1 is corrupting step 6
 #[test]
 fn test_sign_n2_t1_ttag1_corrupt_step6_party1() {
     let res = sign(1, 2, 2, vec![0, 1], 6, &[0]);
-    assert!(res.err().unwrap().bad_actors[..] == [0])
+    assert!(&res.err().unwrap().bad_actors[..] == &[0])
 }
 // party 2 is corrupting step 6
 #[test]
 fn test_sign_n2_t1_ttag1_corrupt_step6_party2() {
     let res = sign(1, 2, 2, vec![0, 1], 6, &[1]);
-    assert!(res.err().unwrap().bad_actors[..] == [0])
+    assert!(&res.err().unwrap().bad_actors[..] == &[1])
 }
 
 // both parties are corrupting step 6
 #[test]
 fn test_sign_n2_t1_ttag1_corrupt_step6_party12() {
     let res = sign(1, 2, 2, vec![0, 1], 6, &[0, 1]);
-    assert!(res.err().unwrap().bad_actors[..] == [0])
+    assert!(&res.err().unwrap().bad_actors[..] == &[0, 1])
 }
 // party 1 is corrupted
 #[test]
 fn test_sign_n5_t2_ttag4_corrupt_step6_party1() {
     let res = sign(2, 5, 4, vec![0, 2, 3, 4], 6, &[0]);
-    assert!(res.err().unwrap().bad_actors[..] == [0])
+    assert!(&res.err().unwrap().bad_actors[..] == &[0])
 }
 
 // party 1,4 are corrupted
@@ -137,14 +146,14 @@ fn test_sign_n5_t2_ttag4_corrupt_step6_party14() {
 #[test]
 fn test_sign_n2_t1_ttag1_corrupt_step7_party2() {
     let res = sign(1, 2, 2, vec![0, 1], 7, &[1]);
-    assert!(res.err().unwrap().bad_actors[..] == [0])
+    assert!(&res.err().unwrap().bad_actors[..] == &[1])
 }
 
 // party 2,4 are corrupted
 #[test]
 fn test_sign_n5_t2_ttag4_corrupt_step7_party24() {
     let res = sign(2, 5, 4, vec![0, 2, 3, 4], 7, &[1, 3]);
-    assert!(res.err().unwrap().bad_actors[..] == [0])
+    assert!(&res.err().unwrap().bad_actors[..] == &[1, 3])
 }
 
 fn keygen_t_n_parties(
@@ -153,12 +162,12 @@ fn keygen_t_n_parties(
 ) -> Result<
     (
         Vec<Keys>,
-        Vec<SharedKeys>,
+        Vec<SharedKeys<Secp256k1>>,
         Vec<Point<Secp256k1>>,
         Point<Secp256k1>,
         VerifiableSS<Secp256k1>,
         Vec<EncryptionKey>,
-        Vec<DLogStatement>,
+        Vec<CompositeDLogStatement>,
     ),
     ErrorType,
 > {
@@ -171,7 +180,7 @@ fn keygen_t_n_parties(
 
     let (bc1_vec, decom_vec): (Vec<_>, Vec<_>) = party_keys_vec
         .iter()
-        .map(|k| k.phase1_broadcast_phase3_proof_of_correct_key_proof_of_correct_h1h2())
+        .map(|k| k.phase1_broadcast_phase3_proof_of_correct_key_proof_of_correct_h1h2().unwrap())
         .unzip();
 
     let e_vec = bc1_vec
@@ -181,7 +190,7 @@ fn keygen_t_n_parties(
     let h1_h2_N_tilde_vec = bc1_vec
         .iter()
         .map(|bc1| bc1.dlog_statement.clone())
-        .collect::<Vec<DLogStatement>>();
+        .collect::<Vec<CompositeDLogStatement>>();
     let y_vec = (0..n)
         .map(|i| decom_vec[i].y_i.clone())
         .collect::<Vec<Point<Secp256k1>>>();
@@ -269,12 +278,14 @@ fn keygen_t_n_parties(
     assert_eq!(x, sum_u_i);
 
     Ok((
-        party_keys_vec,                 // Paillier keys, keypair, N, h1, h2
-        shared_keys_vec,                // Private shares for this MPC keypair
-        pk_vec,                         // dlog proof for x_i
-        y_sum,                          // public key for this MPC keypair.
-        vss_scheme_for_test[0].clone(), // This contains the commitments for each initial share and the shares itself
-        e_vec,                          // paillier encryption keys. Why separate ?
+        party_keys_vec,  // Paillier keys, keypair, N, h1, h2
+        shared_keys_vec, // Private shares for this MPC keypair
+        pk_vec,          // dlog proof for x_i
+        y_sum,           // public key for this MPC keypair.
+        vss_scheme_for_test[0].clone(), /* This contains the commitments for
+                          * each initial share and the shares
+                          * itself */
+        e_vec, // paillier encryption keys. Why separate ?
         h1_h2_N_tilde_vec,
     ))
 }
@@ -288,8 +299,15 @@ fn sign(
     corrupted_parties: &[usize],
 ) -> Result<SignatureRecid, ErrorType> {
     // full key gen emulation
-    let (party_keys_vec, shared_keys_vec, pk_vec, y, vss_scheme, ek_vec, dlog_statement_vec) =
-        keygen_t_n_parties(t, n).unwrap();
+    let (
+        party_keys_vec,
+        shared_keys_vec,
+        pk_vec,
+        y,
+        vss_scheme,
+        ek_vec,
+        dlog_statement_vec,
+    ) = keygen_t_n_parties(t, n).unwrap();
 
     // transform the t,n share to t,t+1 share. Get the public keys for the same.
     let g_w_vec = SignKeys::g_w_vec(&pk_vec, &s[..], &vss_scheme);
@@ -297,42 +315,53 @@ fn sign(
     let private_vec = (0..shared_keys_vec.len())
         .map(|i| shared_keys_vec[i].x_i.clone())
         .collect::<Vec<_>>();
-    // make sure that we have t<t'<n and the group s contains id's for t' parties
-    // TODO: make sure s has unique id's and they are all in range 0..n
-    // TODO: make sure this code can run when id's are not in ascending order
+    // make sure that we have t<t'<n and the group s contains id's for t'
+    // parties TODO: make sure s has unique id's and they are all in range
+    // 0..n TODO: make sure this code can run when id's are not in ascending
+    // order
     assert!(ttag > t);
     let ttag = ttag as usize;
     assert_eq!(s.len(), ttag);
 
-    // each party creates a signing key. This happens in parallel IRL. In this test we
-    // create a vector of signing keys, one for each party.
+    // each party creates a signing key. This happens in parallel IRL. In this
+    // test we create a vector of signing keys, one for each party.
     // throughout i will index parties
     let sign_keys_vec = (0..ttag)
         .map(|i| SignKeys::create(&private_vec[s[i]], &vss_scheme, s[i], &s))
         .collect::<Vec<SignKeys>>();
 
-    // each party computes [Ci,Di] = com(g^gamma_i) and broadcast the commitments
+    // each party computes [Ci,Di] = com(g^gamma_i) and broadcast the
+    // commitments
     let (bc1_vec, decommit_vec1): (Vec<_>, Vec<_>) =
         sign_keys_vec.iter().map(|k| k.phase1_broadcast()).unzip();
 
     // each signer's dlog statement. in reality, parties prove statements
-    // using only other parties' h1,h2,N_tilde. here we also use own parameters for simplicity
+    // using only other parties' h1,h2,N_tilde. here we also use own parameters
+    // for simplicity
     let signers_dlog_statements = (0..ttag)
         .map(|i| dlog_statement_vec[s[i]].clone())
-        .collect::<Vec<DLogStatement>>();
+        .collect::<Vec<CompositeDLogStatement>>();
 
     // each party i BROADCASTS encryption of k_i under her Paillier key
     // m_a_vec = [ma_0;ma_1;,...]
     // we assume here that party sends the same encryption to all other parties.
-    // It should be changed to different encryption (randomness) to each counter party
+    // It should be changed to different encryption (randomness) to each counter
+    // party
     let m_a_vec: Vec<_> = sign_keys_vec
         .iter()
         .enumerate()
-        .map(|(i, k)| MessageA::a(&k.k_i, &party_keys_vec[s[i]].ek, &signers_dlog_statements))
+        .map(|(i, k)| {
+            MessageA::a(
+                &k.k_i,
+                &party_keys_vec[s[i]].ek,
+                &signers_dlog_statements,
+            )
+        })
         .collect();
 
-    // #each party i sends responses to m_a_vec she received (one response with input gamma_i and one with w_i)
-    // #m_b_gamma_vec_all is a matrix where column i is a vector of message_b's that were sent to party i
+    // #each party i sends responses to m_a_vec she received (one response with
+    // input gamma_i and one with w_i) #m_b_gamma_vec_all is a matrix where
+    // column i is a vector of message_b's that were sent to party i
 
     // aggregation of the n messages of all parties
     let mut m_b_gamma_vec_all = Vec::new();
@@ -353,13 +382,14 @@ fn sign(
 
         for j in 0..ttag - 1 {
             let ind = if j < i { j } else { j + 1 };
-            let (m_b_gamma, beta_gamma, beta_randomness, beta_tag) = MessageB::b(
-                &sign_keys_vec[ind].gamma_i,
-                &ek_vec[s[i]],
-                m_a_vec[i].0.clone(),
-                &signers_dlog_statements,
-            )
-            .expect("Alice's range proofs in MtA failed");
+            let (m_b_gamma, beta_gamma, beta_randomness, beta_tag) =
+                MessageB::b(
+                    &sign_keys_vec[ind].gamma_i,
+                    &ek_vec[s[i]],
+                    m_a_vec[i].0.clone(),
+                    &signers_dlog_statements,
+                )
+                .expect("Alice's range proofs in MtA failed");
             let (m_b_w, beta_wi, _, _) = MessageB::b(
                 &sign_keys_vec[ind].w_i,
                 &ek_vec[s[i]],
@@ -383,8 +413,9 @@ fn sign(
         ni_vec_all.push(ni_vec.clone());
     }
 
-    // Here we complete the MwA protocols by taking the mb matrices and starting with the first column,
-    // generating the appropriate message. The first column is the answers of party 1 to mb sent from other parties.
+    // Here we complete the MwA protocols by taking the mb matrices and starting
+    // with the first column, generating the appropriate message. The first
+    // column is the answers of party 1 to mb sent from other parties.
     // The second column is the answers that party 2 is sending and so on.
 
     // TODO: simulate as IRL
@@ -407,15 +438,24 @@ fn sign(
 
             // TODO: identify these errors
             let alpha_ij_gamma = m_b
-                .verify_proofs_get_alpha(&party_keys_vec[s[i]].dk, &sign_keys_vec[i].k_i)
+                .verify_proofs_get_alpha(
+                    &party_keys_vec[s[i]].dk,
+                    &sign_keys_vec[i].k_i,
+                )
                 .expect("wrong dlog or m_b");
             let m_b = m_b_w_vec_i[j].clone();
             let alpha_ij_wi = m_b
-                .verify_proofs_get_alpha(&party_keys_vec[s[i]].dk, &sign_keys_vec[i].k_i)
+                .verify_proofs_get_alpha(
+                    &party_keys_vec[s[i]].dk,
+                    &sign_keys_vec[i].k_i,
+                )
                 .expect("wrong dlog or m_b");
 
-            // since we actually run two MtAwc each party needs to make sure that the values B are the same as the public values
-            // here for b=w_i the parties already know W_i = g^w_i  for each party so this check is done here. for b = gamma_i the check will be later when g^gamma_i will become public
+            // since we actually run two MtAwc each party needs to make sure
+            // that the values B are the same as the public values
+            // here for b=w_i the parties already know W_i = g^w_i  for each
+            // party so this check is done here. for b = gamma_i the check will
+            // be later when g^gamma_i will become public
             // currently we take the W_i from the other parties signing keys
             // TODO: use pk_vec (first change from x_i to w_i) for this check.
             assert_eq!(m_b.b_proof.pk, sign_keys_vec[ind].g_w_i);
@@ -452,9 +492,11 @@ fn sign(
             })
             .collect::<Vec<Scalar<Secp256k1>>>();
 
-        let mut delta = sign_keys_vec[i].phase2_delta_i(&alpha_vec_all[i], &beta_vec);
+        let mut delta =
+            sign_keys_vec[i].phase2_delta_i(&alpha_vec_all[i], &beta_vec);
 
-        let mut sigma = sign_keys_vec[i].phase2_sigma_i(&miu_vec_all[i], &ni_vec);
+        let mut sigma =
+            sign_keys_vec[i].phase2_sigma_i(&miu_vec_all[i], &ni_vec);
         // test wrong delta corruption
         if corrupt_step == 5 && corrupted_parties.iter().any(|&x| x == i) {
             delta = &delta + &delta;
@@ -484,8 +526,8 @@ fn sign(
         assert_eq!(T_vec[i], T_proof_vec[i].com.clone());
         PedersenProof::verify(&T_proof_vec[i]).expect("error T proof");
     }
-    // de-commit to g^gamma_i from phase1, test comm correctness, and that it is the same value used in MtA.
-    // Return R
+    // de-commit to g^gamma_i from phase1, test comm correctness, and that it is
+    // the same value used in MtA. Return R
 
     let R_vec = (0..ttag)
         .map(|i| {
@@ -494,8 +536,14 @@ fn sign(
             let b_proof_vec = (0..ttag - 1)
                 .map(|j| &m_b_gamma_vec[j].b_proof)
                 .collect::<Vec<&DLogProof<Secp256k1, Sha256>>>();
-            SignKeys::phase4(&delta_inv, &b_proof_vec, decommit_vec1.clone(), &bc1_vec, i)
-                .expect("") //TODO: propagate the error
+            SignKeys::phase4(
+                &delta_inv,
+                &b_proof_vec,
+                decommit_vec1.clone(),
+                &bc1_vec,
+                i,
+            )
+            .expect("") //TODO: propagate the error
         })
         .collect::<Vec<Point<Secp256k1>>>();
 
@@ -506,7 +554,8 @@ fn sign(
         .collect::<Vec<Point<Secp256k1>>>();
 
     // each party sends first message to all other parties
-    let mut phase5_proofs_vec: Vec<Vec<PDLwSlackProof>> = vec![Vec::new(); ttag];
+    let mut phase5_proofs_vec: Vec<Vec<PDLwSlackProof>> =
+        vec![Vec::new(); ttag];
     for i in 0..ttag {
         for j in 0..ttag - 1 {
             let ind = if j < i { j } else { j + 1 };
@@ -543,10 +592,11 @@ fn sign(
     //each party must run the test
     let phase5_check = LocalSignature::phase5_check_R_dash_sum(&R_dash_vec);
     if phase5_check.is_err() {
-        // initiate phase 5 blame protocol to learn which parties acted maliciously.
-        // each party generates local state and share with other parties.
-        // assuming sync communication - if a message was failed to arrive from a party -
-        // this party should automatically be blamed
+        // initiate phase 5 blame protocol to learn which parties acted
+        // maliciously. each party generates local state and share with
+        // other parties. assuming sync communication - if a message was
+        // failed to arrive from a party - this party should
+        // automatically be blamed
         let mut local_state_vec = Vec::new();
         for i in 0..ttag {
             // compose beta tag vector:
@@ -556,7 +606,8 @@ fn sign(
                 let ind1 = if j < i { j } else { j + 1 };
                 let ind2 = if j < i { i - 1 } else { i };
                 beta_tag_vec_to_test.push(beta_tag_vec_all[ind1][ind2].clone());
-                beta_randomness_vec_to_test.push(beta_randomness_vec_all[ind1][ind2].clone());
+                beta_randomness_vec_to_test
+                    .push(beta_randomness_vec_all[ind1][ind2].clone());
             }
 
             let local_state = LocalStatePhase5 {
@@ -596,24 +647,31 @@ fn sign(
     let mut S_vec = Vec::new();
     let mut homo_elgamal_proof_vec = Vec::new();
     for i in 0..ttag {
-        let (S_i, homo_elgamal_proof) = LocalSignature::phase6_compute_S_i_and_proof_of_consistency(
-            &R_vec[i],
-            &T_vec[i],
-            &sigma_vec[i],
-            &l_vec[i],
-        );
+        let (S_i, homo_elgamal_proof) =
+            LocalSignature::phase6_compute_S_i_and_proof_of_consistency(
+                &R_vec[i],
+                &T_vec[i],
+                &sigma_vec[i],
+                &l_vec[i],
+            );
         S_vec.push(S_i);
         homo_elgamal_proof_vec.push(homo_elgamal_proof);
     }
 
-    LocalSignature::phase6_verify_proof(&S_vec, &homo_elgamal_proof_vec, &R_vec, &T_vec)?;
+    LocalSignature::phase6_verify_proof(
+        &S_vec,
+        &homo_elgamal_proof_vec,
+        &R_vec,
+        &T_vec,
+    )?;
 
     let phase6_check = LocalSignature::phase6_check_S_i_sum(&y, &S_vec);
     if phase6_check.is_err() {
-        // initiate phase 6 blame protocol to learn which parties acted maliciously.
-        // each party generates local state and share with other parties.
-        // assuming sync communication - if a message was failed to arrive from a party -
-        // this party should automatically be blamed
+        // initiate phase 6 blame protocol to learn which parties acted
+        // maliciously. each party generates local state and share with
+        // other parties. assuming sync communication - if a message was
+        // failed to arrive from a party - this party should
+        // automatically be blamed
 
         let mut local_state_vec = Vec::new();
         for i in 0..ttag {
@@ -625,7 +683,11 @@ fn sign(
                 );
                 miu_randomness_vec.push(rand);
             }
-            let proof = GlobalStatePhase6::ecddh_proof(&sigma_vec[i], &R_vec[i], &S_vec[i]);
+            let proof = GlobalStatePhase6::ecddh_proof(
+                &sigma_vec[i],
+                &R_vec[i],
+                &S_vec[i],
+            );
             let local_state = LocalStatePhase6 {
                 k: sign_keys_vec[i].k_i.clone(),
                 k_randomness: m_a_vec[i].1.clone(),
@@ -708,7 +770,12 @@ fn sign(
     Ok(sig)
 }
 
-fn check_sig(r: &Scalar<Secp256k1>, s: &Scalar<Secp256k1>, msg: &BigInt, pk: &Point<Secp256k1>) {
+fn check_sig(
+    r: &Scalar<Secp256k1>,
+    s: &Scalar<Secp256k1>,
+    msg: &BigInt,
+    pk: &Point<Secp256k1>,
+) {
     use secp256k1::{Message, PublicKey, Signature, SECP256K1};
 
     let raw_msg = BigInt::to_bytes(msg);
@@ -751,14 +818,18 @@ fn test_serialize_deserialize() {
     use serde_json;
 
     let k = Keys::create(0);
-    let (commit, decommit) = k.phase1_broadcast_phase3_proof_of_correct_key_proof_of_correct_h1h2();
+    let (commit, decommit) = k
+        .phase1_broadcast_phase3_proof_of_correct_key_proof_of_correct_h1h2()
+        .unwrap();
 
     let encoded = serde_json::to_string(&commit).unwrap();
-    let decoded: KeyGenBroadcastMessage1 = serde_json::from_str(&encoded).unwrap();
+    let decoded: KeyGenBroadcastMessage1 =
+        serde_json::from_str(&encoded).unwrap();
     assert_eq!(commit.com, decoded.com);
 
     let encoded = serde_json::to_string(&decommit).unwrap();
-    let decoded: KeyGenDecommitMessage1 = serde_json::from_str(&encoded).unwrap();
+    let decoded: KeyGenDecommitMessage1 =
+        serde_json::from_str(&encoded).unwrap();
     assert_eq!(decommit.y_i, decoded.y_i);
 }
 #[test]
@@ -769,7 +840,9 @@ fn test_small_paillier() {
     let (ek, dk) = Paillier::keypair_with_modulus_size(2046).keys();
     k.dk = dk;
     k.ek = ek;
-    let (commit, decommit) = k.phase1_broadcast_phase3_proof_of_correct_key_proof_of_correct_h1h2();
+    let (commit, decommit) = k
+        .phase1_broadcast_phase3_proof_of_correct_key_proof_of_correct_h1h2()
+        .unwrap();
     assert!(k
         .phase1_verify_com_phase3_verify_correct_key_verify_dlog_phase2_distribute(
             &Parameters {

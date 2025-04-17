@@ -14,10 +14,19 @@
     @license GPL-3.0+ <https://github.com/KZen-networks/multi-party-ecdsa/blob/master/LICENSE>
 */
 
-const SECURITY_BITS: usize = 256;
+pub mod blame;
+pub mod party_i;
+pub mod state_machine;
 
-pub mod party_one;
-pub mod party_two;
+use curv::cryptographic_primitives::secret_sharing::feldman_vss::VerifiableSS as VSS;
+pub type VerifiableSS<T> = VSS<T, sha2::Sha256>;
 
 #[cfg(test)]
 mod test;
+
+#[derive(Clone, Debug)]
+pub struct ErrorType {
+    pub error_type: String,
+    pub bad_actors: Vec<usize>,
+    pub data: Vec<u8>,
+}

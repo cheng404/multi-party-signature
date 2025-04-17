@@ -1,4 +1,4 @@
-use curv::cryptographic_primitives::secret_sharing::feldman_vss::VerifiableSS;
+use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::VerifiableSS;
 use curv::elliptic::curves::secp256_k1::Secp256k1;
 use curv::elliptic::curves::{Point, Scalar};
 // use curv::elliptic::curves::traits::ECPoint;

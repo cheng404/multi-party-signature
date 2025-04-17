@@ -1,3 +1,6 @@
 [workspace]
 resolver = "2"
 members = ["multi-party-ecdsa"]
+
+[patch.crates-io]
+curv-kzen = { git = "https://github.com/cheng404/curv.git", rev="e1567a5" }

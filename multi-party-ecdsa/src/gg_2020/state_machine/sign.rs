@@ -1,31 +1,35 @@
 //! # High-level threshold signing protocol implementation
 //!
-//! Key feature of GG20 protocol is one-round online signing, meaning that every party needs to
-//! broadcast just a single message to sign a data. However, it still requires completing an offline
-//! computation for fixed set of parties
+//! Key feature of GG20 protocol is one-round online signing, meaning that every
+//! party needs to broadcast just a single message to sign a data. However, it
+//! still requires completing an offline computation for fixed set of parties
 //!
 //! ## How to get things work
 //!
-//! First of all, parties need to carry out distributed key generation protocol (see [keygen module]).
-//! After DKG is successfully completed, it outputs [LocalKey] — a party local secret share.
-//! Then you fix a set of parties who will participate in threshold signing, and they run
-//! [OfflineStage] protocol. `OfflineStage` implements [StateMachine] and can be executed in the same
-//! way as [Keygen]. `OfflineStage` outputs a [CompletedOfflineStage]. [SignManual] takes a
-//! `CompletedOfflineStage` and allows you to perform one-round signing. It doesn't implement
-//! `StateMachine`, but rather provides methods to construct messages and final signature manually
-//! (refer to [SignManual] documentation to see how to use it).
+//! First of all, parties need to carry out distributed key generation protocol
+//! (see [keygen module]). After DKG is successfully completed, it outputs
+//! [LocalKey] — a party local secret share. Then you fix a set of parties who
+//! will participate in threshold signing, and they run [OfflineStage] protocol.
+//! `OfflineStage` implements [StateMachine] and can be executed in the same way
+//! as [Keygen]. `OfflineStage` outputs a [CompletedOfflineStage]. [SignManual]
+//! takes a `CompletedOfflineStage` and allows you to perform one-round signing.
+//! It doesn't implement `StateMachine`, but rather provides methods to
+//! construct messages and final signature manually (refer to [SignManual]
+//! documentation to see how to use it).
 //!
 //! [keygen module]: super::keygen
 //! [Keygen]: super::keygen::Keygen
 //! [LocalKey]: super::keygen::LocalKey
 //! [StateMachine]: round_based::StateMachine
 
-use std::convert::TryFrom;
-use std::mem::replace;
-use std::time::Duration;
+use std::{convert::TryFrom, mem::replace, time::Duration};
 
-use round_based::containers::{push::Push, BroadcastMsgs, MessageStore, P2PMsgs, Store, StoreErr};
-use round_based::{IsCritical, Msg, StateMachine};
+use round_based::{
+    containers::{
+        push::Push, BroadcastMsgs, MessageStore, P2PMsgs, Store, StoreErr,
+    },
+    IsCritical, Msg, StateMachine,
+};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -33,21 +37,25 @@ use crate::utilities::mta::MessageA;
 
 use crate::protocols::multi_party_ecdsa::gg_2020 as gg20;
 use curv::elliptic::curves::secp256_k1::Secp256k1;
-use gg20::party_i::{SignBroadcastPhase1, SignDecommitPhase1, SignatureRecid};
-use gg20::state_machine::keygen::LocalKey;
+use gg20::{
+    party_i::{SignBroadcastPhase1, SignDecommitPhase1, SignatureRecid},
+    state_machine::keygen::LocalKey,
+};
 
 mod fmt;
-mod rounds;
+pub mod rounds;
 
 use crate::utilities::zk_pdl_with_slack::PDLwSlackProof;
 use curv::BigInt;
 use rounds::*;
-pub use rounds::{CompletedOfflineStage, Error as ProceedError, PartialSignature};
+pub use rounds::{
+    CompletedOfflineStage, Error as ProceedError, PartialSignature,
+};
 
 /// Offline Stage of GG20 signing
 ///
-/// Successfully carried out Offline Stage will produce [CompletedOfflineStage] that can
-/// be used for one-round signing multiple times.
+/// Successfully carried out Offline Stage will produce [CompletedOfflineStage]
+/// that can be used for one-round signing multiple times.
 pub struct OfflineStage {
     round: OfflineR,
 
@@ -67,15 +75,20 @@ pub struct OfflineStage {
 impl OfflineStage {
     /// Construct a party of offline stage of threshold signing protocol
     ///
-    /// Once offline stage is finished, parties can do one-round threshold signing (i.e. they only
-    /// need to exchange a single set of messages).
+    /// Once offline stage is finished, parties can do one-round threshold
+    /// signing (i.e. they only need to exchange a single set of messages).
     ///
-    /// Takes party index `i` (in range `[1; n]`), list `s_l` of parties' indexes from keygen protocol
-    /// (`s_l[i]` must be an index of party `i` that was used by this party in keygen protocol), and
-    /// party local secret share `local_key`.
+    /// Takes party index `i` (in range `[1; n]`), list `s_l` of parties'
+    /// indexes from keygen protocol (`s_l[i]` must be an index of party `i`
+    /// that was used by this party in keygen protocol), and party local
+    /// secret share `local_key`.
     ///
     /// Returns error if given arguments are contradicting.
-    pub fn new(i: u16, s_l: Vec<u16>, local_key: LocalKey<Secp256k1>) -> Result<Self> {
+    pub fn new(
+        i: u16,
+        s_l: Vec<u16>,
+        local_key: LocalKey<Secp256k1>,
+    ) -> Result<Self> {
         if s_l.len() < 2 {
             return Err(Error::TooFewParties);
         }
@@ -99,7 +112,8 @@ impl OfflineStage {
             }
         }
 
-        let n = u16::try_from(s_l.len()).map_err(|_| Error::TooManyParties { n: s_l.len() })?;
+        let n = u16::try_from(s_l.len())
+            .map_err(|_| Error::TooManyParties { n: s_l.len() })?;
 
         Ok(Self {
             round: OfflineR::R0(Round0 { i, s_l, local_key }),
@@ -124,12 +138,18 @@ impl OfflineStage {
     // }
 
     fn proceed_round(&mut self, may_block: bool) -> Result<()> {
-        let store1_wants_more = self.msgs1.as_ref().map(|s| s.wants_more()).unwrap_or(false);
-        let store2_wants_more = self.msgs2.as_ref().map(|s| s.wants_more()).unwrap_or(false);
-        let store3_wants_more = self.msgs3.as_ref().map(|s| s.wants_more()).unwrap_or(false);
-        let store4_wants_more = self.msgs4.as_ref().map(|s| s.wants_more()).unwrap_or(false);
-        let store5_wants_more = self.msgs5.as_ref().map(|s| s.wants_more()).unwrap_or(false);
-        let store6_wants_more = self.msgs6.as_ref().map(|s| s.wants_more()).unwrap_or(false);
+        let store1_wants_more =
+            self.msgs1.as_ref().map(|s| s.wants_more()).unwrap_or(false);
+        let store2_wants_more =
+            self.msgs2.as_ref().map(|s| s.wants_more()).unwrap_or(false);
+        let store3_wants_more =
+            self.msgs3.as_ref().map(|s| s.wants_more()).unwrap_or(false);
+        let store4_wants_more =
+            self.msgs4.as_ref().map(|s| s.wants_more()).unwrap_or(false);
+        let store5_wants_more =
+            self.msgs5.as_ref().map(|s| s.wants_more()).unwrap_or(false);
+        let store6_wants_more =
+            self.msgs6.as_ref().map(|s| s.wants_more()).unwrap_or(false);
 
         let next_state: OfflineR;
         let try_again: bool = match replace(&mut self.round, OfflineR::Gone) {
@@ -144,8 +164,12 @@ impl OfflineStage {
                 next_state = s;
                 false
             }
-            OfflineR::R1(round) if !store1_wants_more && (!round.is_expensive() || may_block) => {
-                let store = self.msgs1.take().ok_or(InternalError::StoreGone)?;
+            OfflineR::R1(round)
+                if !store1_wants_more
+                    && (!round.is_expensive() || may_block) =>
+            {
+                let store =
+                    self.msgs1.take().ok_or(InternalError::StoreGone)?;
                 let msgs = store
                     .finish()
                     .map_err(InternalError::RetrieveMessagesFromStore)?;
@@ -159,8 +183,12 @@ impl OfflineStage {
                 next_state = s;
                 false
             }
-            OfflineR::R2(round) if !store2_wants_more && (!round.is_expensive() || may_block) => {
-                let store = self.msgs2.take().ok_or(InternalError::StoreGone)?;
+            OfflineR::R2(round)
+                if !store2_wants_more
+                    && (!round.is_expensive() || may_block) =>
+            {
+                let store =
+                    self.msgs2.take().ok_or(InternalError::StoreGone)?;
                 let msgs = store
                     .finish()
                     .map_err(InternalError::RetrieveMessagesFromStore)?;
@@ -174,8 +202,12 @@ impl OfflineStage {
                 next_state = s;
                 false
             }
-            OfflineR::R3(round) if !store3_wants_more && (!round.is_expensive() || may_block) => {
-                let store = self.msgs3.take().ok_or(InternalError::StoreGone)?;
+            OfflineR::R3(round)
+                if !store3_wants_more
+                    && (!round.is_expensive() || may_block) =>
+            {
+                let store =
+                    self.msgs3.take().ok_or(InternalError::StoreGone)?;
                 let msgs = store
                     .finish()
                     .map_err(InternalError::RetrieveMessagesFromStore)?;
@@ -189,8 +221,12 @@ impl OfflineStage {
                 next_state = s;
                 false
             }
-            OfflineR::R4(round) if !store4_wants_more && (!round.is_expensive() || may_block) => {
-                let store = self.msgs4.take().ok_or(InternalError::StoreGone)?;
+            OfflineR::R4(round)
+                if !store4_wants_more
+                    && (!round.is_expensive() || may_block) =>
+            {
+                let store =
+                    self.msgs4.take().ok_or(InternalError::StoreGone)?;
                 let msgs = store
                     .finish()
                     .map_err(InternalError::RetrieveMessagesFromStore)?;
@@ -204,8 +240,12 @@ impl OfflineStage {
                 next_state = s;
                 false
             }
-            OfflineR::R5(round) if !store5_wants_more && (!round.is_expensive() || may_block) => {
-                let store = self.msgs5.take().ok_or(InternalError::StoreGone)?;
+            OfflineR::R5(round)
+                if !store5_wants_more
+                    && (!round.is_expensive() || may_block) =>
+            {
+                let store =
+                    self.msgs5.take().ok_or(InternalError::StoreGone)?;
                 let msgs = store
                     .finish()
                     .map_err(InternalError::RetrieveMessagesFromStore)?;
@@ -219,8 +259,12 @@ impl OfflineStage {
                 next_state = s;
                 false
             }
-            OfflineR::R6(round) if !store6_wants_more && (!round.is_expensive() || may_block) => {
-                let store = self.msgs6.take().ok_or(InternalError::StoreGone)?;
+            OfflineR::R6(round)
+                if !store6_wants_more
+                    && (!round.is_expensive() || may_block) =>
+            {
+                let store =
+                    self.msgs6.take().ok_or(InternalError::StoreGone)?;
                 let msgs = store
                     .finish()
                     .map_err(InternalError::RetrieveMessagesFromStore)?;
@@ -254,18 +298,20 @@ impl StateMachine for OfflineStage {
     type Err = Error;
     type Output = CompletedOfflineStage;
 
-    fn handle_incoming(&mut self, msg: Msg<Self::MessageBody>) -> Result<(), Self::Err> {
+    fn handle_incoming(
+        &mut self,
+        msg: Msg<Self::MessageBody>,
+    ) -> Result<(), Self::Err> {
         let current_round = self.current_round();
 
         match msg.body {
             OfflineProtocolMessage(OfflineM::M1(m)) => {
-                let store = self
-                    .msgs1
-                    .as_mut()
-                    .ok_or(Error::ReceivedOutOfOrderMessage {
+                let store = self.msgs1.as_mut().ok_or(
+                    Error::ReceivedOutOfOrderMessage {
                         current_round,
                         msg_round: 1,
-                    })?;
+                    },
+                )?;
                 store
                     .push_msg(Msg {
                         sender: msg.sender,
@@ -275,13 +321,12 @@ impl StateMachine for OfflineStage {
                     .map_err(Error::HandleMessage)?;
             }
             OfflineProtocolMessage(OfflineM::M2(m)) => {
-                let store = self
-                    .msgs2
-                    .as_mut()
-                    .ok_or(Error::ReceivedOutOfOrderMessage {
+                let store = self.msgs2.as_mut().ok_or(
+                    Error::ReceivedOutOfOrderMessage {
                         current_round,
                         msg_round: 2,
-                    })?;
+                    },
+                )?;
                 store
                     .push_msg(Msg {
                         sender: msg.sender,
@@ -291,13 +336,12 @@ impl StateMachine for OfflineStage {
                     .map_err(Error::HandleMessage)?;
             }
             OfflineProtocolMessage(OfflineM::M3(m)) => {
-                let store = self
-                    .msgs3
-                    .as_mut()
-                    .ok_or(Error::ReceivedOutOfOrderMessage {
+                let store = self.msgs3.as_mut().ok_or(
+                    Error::ReceivedOutOfOrderMessage {
                         current_round,
                         msg_round: 2,
-                    })?;
+                    },
+                )?;
                 store
                     .push_msg(Msg {
                         sender: msg.sender,
@@ -307,13 +351,12 @@ impl StateMachine for OfflineStage {
                     .map_err(Error::HandleMessage)?;
             }
             OfflineProtocolMessage(OfflineM::M4(m)) => {
-                let store = self
-                    .msgs4
-                    .as_mut()
-                    .ok_or(Error::ReceivedOutOfOrderMessage {
+                let store = self.msgs4.as_mut().ok_or(
+                    Error::ReceivedOutOfOrderMessage {
                         current_round,
                         msg_round: 2,
-                    })?;
+                    },
+                )?;
                 store
                     .push_msg(Msg {
                         sender: msg.sender,
@@ -323,13 +366,12 @@ impl StateMachine for OfflineStage {
                     .map_err(Error::HandleMessage)?;
             }
             OfflineProtocolMessage(OfflineM::M5(m)) => {
-                let store = self
-                    .msgs5
-                    .as_mut()
-                    .ok_or(Error::ReceivedOutOfOrderMessage {
+                let store = self.msgs5.as_mut().ok_or(
+                    Error::ReceivedOutOfOrderMessage {
                         current_round,
                         msg_round: 2,
-                    })?;
+                    },
+                )?;
                 store
                     .push_msg(Msg {
                         sender: msg.sender,
@@ -339,13 +381,12 @@ impl StateMachine for OfflineStage {
                     .map_err(Error::HandleMessage)?;
             }
             OfflineProtocolMessage(OfflineM::M6(m)) => {
-                let store = self
-                    .msgs6
-                    .as_mut()
-                    .ok_or(Error::ReceivedOutOfOrderMessage {
+                let store = self.msgs6.as_mut().ok_or(
+                    Error::ReceivedOutOfOrderMessage {
                         current_round,
                         msg_round: 2,
-                    })?;
+                    },
+                )?;
                 store
                     .push_msg(Msg {
                         sender: msg.sender,
@@ -363,12 +404,18 @@ impl StateMachine for OfflineStage {
     }
 
     fn wants_to_proceed(&self) -> bool {
-        let store1_wants_more = self.msgs1.as_ref().map(|s| s.wants_more()).unwrap_or(false);
-        let store2_wants_more = self.msgs2.as_ref().map(|s| s.wants_more()).unwrap_or(false);
-        let store3_wants_more = self.msgs3.as_ref().map(|s| s.wants_more()).unwrap_or(false);
-        let store4_wants_more = self.msgs4.as_ref().map(|s| s.wants_more()).unwrap_or(false);
-        let store5_wants_more = self.msgs5.as_ref().map(|s| s.wants_more()).unwrap_or(false);
-        let store6_wants_more = self.msgs6.as_ref().map(|s| s.wants_more()).unwrap_or(false);
+        let store1_wants_more =
+            self.msgs1.as_ref().map(|s| s.wants_more()).unwrap_or(false);
+        let store2_wants_more =
+            self.msgs2.as_ref().map(|s| s.wants_more()).unwrap_or(false);
+        let store3_wants_more =
+            self.msgs3.as_ref().map(|s| s.wants_more()).unwrap_or(false);
+        let store4_wants_more =
+            self.msgs4.as_ref().map(|s| s.wants_more()).unwrap_or(false);
+        let store5_wants_more =
+            self.msgs5.as_ref().map(|s| s.wants_more()).unwrap_or(false);
+        let store6_wants_more =
+            self.msgs6.as_ref().map(|s| s.wants_more()).unwrap_or(false);
 
         match &self.round {
             OfflineR::R0(_) => true,
@@ -438,14 +485,21 @@ impl StateMachine for OfflineStage {
 }
 
 impl super::traits::RoundBlame for OfflineStage {
-    /// RoundBlame returns number of unwilling parties and a vector of their party indexes.
+    /// RoundBlame returns number of unwilling parties and a vector of their
+    /// party indexes.
     fn round_blame(&self) -> (u16, Vec<u16>) {
-        let store1_blame = self.msgs1.as_ref().map(|s| s.blame()).unwrap_or_default();
-        let store2_blame = self.msgs2.as_ref().map(|s| s.blame()).unwrap_or_default();
-        let store3_blame = self.msgs3.as_ref().map(|s| s.blame()).unwrap_or_default();
-        let store4_blame = self.msgs4.as_ref().map(|s| s.blame()).unwrap_or_default();
-        let store5_blame = self.msgs5.as_ref().map(|s| s.blame()).unwrap_or_default();
-        let store6_blame = self.msgs6.as_ref().map(|s| s.blame()).unwrap_or_default();
+        let store1_blame =
+            self.msgs1.as_ref().map(|s| s.blame()).unwrap_or_default();
+        let store2_blame =
+            self.msgs2.as_ref().map(|s| s.blame()).unwrap_or_default();
+        let store3_blame =
+            self.msgs3.as_ref().map(|s| s.blame()).unwrap_or_default();
+        let store4_blame =
+            self.msgs4.as_ref().map(|s| s.blame()).unwrap_or_default();
+        let store5_blame =
+            self.msgs5.as_ref().map(|s| s.blame()).unwrap_or_default();
+        let store6_blame =
+            self.msgs6.as_ref().map(|s| s.blame()).unwrap_or_default();
 
         let default = (0, vec![]);
         match &self.round {
@@ -477,6 +531,19 @@ enum OfflineR {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct OfflineProtocolMessage(OfflineM);
+
+impl crate::MessageRoundID for OfflineProtocolMessage {
+    fn round_id(&self) -> u16 {
+        match &self.0 {
+            OfflineM::M1(_) => 1,
+            OfflineM::M2(_) => 2,
+            OfflineM::M3(_) => 3,
+            OfflineM::M4(_) => 4,
+            OfflineM::M5(_) => 5,
+            OfflineM::M6(_) => 6,
+        }
+    }
+}
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[allow(clippy::large_enum_variant)]
@@ -523,15 +590,17 @@ pub enum Error {
     /// Too few parties (`n < 2`)
     #[error("at least 2 parties are required for signing")]
     TooFewParties,
-    /// Too many parties. `n` must fit into `u16`, so only `n < u16::MAX` values are supported.
+    /// Too many parties. `n` must fit into `u16`, so only `n < u16::MAX`
+    /// values are supported.
     #[error("too many parties: n={n}, n must be less than 2^16")]
     TooManyParties { n: usize },
     /// Party index `i` is not in range `[1; n]`
     #[error("party index is not in range [1; n]")]
     InvalidPartyIndex,
-    /// List `s_l` is invalid. Either it contains duplicates (`exist i j. i != j && s_l[i] = s_l[j]`),
-    /// or contains index that is not in the range `[1; keygen_n]`, `keygen_n` — number of parties
-    /// participated in DKG (`exist i. s_l[i] = 0 || s_l[i] > keygen_n`).
+    /// List `s_l` is invalid. Either it contains duplicates (`exist i j. i !=
+    /// j && s_l[i] = s_l[j]`), or contains index that is not in the range
+    /// `[1; keygen_n]`, `keygen_n` — number of parties participated in DKG
+    /// (`exist i. s_l[i] = 0 || s_l[i] > keygen_n`).
     #[error("invalid s_l")]
     InvalidSl,
 
@@ -539,7 +608,8 @@ pub enum Error {
     #[error("proceeding round: {0}")]
     ProceedRound(rounds::Error),
 
-    /// Received message which we didn't expect to receive now (e.g. message from previous round)
+    /// Received message which we didn't expect to receive now (e.g. message
+    /// from previous round)
     #[error(
         "didn't expect to receive message from round {msg_round} (being at round {current_round})"
     )]
@@ -591,8 +661,8 @@ impl IsCritical for Error {
 
 /// Manual GG20 signing
 ///
-/// After you completed [OfflineStage] and got [CompletedOfflineStage], parties can perform signing
-/// simply by broadcasting a single message.
+/// After you completed [OfflineStage] and got [CompletedOfflineStage], parties
+/// can perform signing simply by broadcasting a single message.
 ///
 /// ## Example
 /// ```no_run
@@ -636,9 +706,12 @@ impl SignManual {
             .map_err(SignError::LocalSigning)
     }
 
-    /// `sigs` must not include partial signature produced by local party (only partial signatures produced
-    /// by other parties)
-    pub fn complete(self, sigs: &[PartialSignature]) -> Result<SignatureRecid, SignError> {
+    /// `sigs` must not include partial signature produced by local party (only
+    /// partial signatures produced by other parties)
+    pub fn complete(
+        self,
+        sigs: &[PartialSignature],
+    ) -> Result<SignatureRecid, SignError> {
         self.state
             .proceed_manual(sigs)
             .map_err(SignError::CompleteSigning)
@@ -655,14 +728,15 @@ pub enum SignError {
 
 #[cfg(test)]
 mod test {
-    use curv::arithmetic::Converter;
-    use curv::cryptographic_primitives::hashing::{Digest, DigestExt};
+    use curv::{
+        arithmetic::Converter,
+        cryptographic_primitives::hashing::{Digest, DigestExt},
+    };
     use round_based::dev::Simulation;
     use sha2::Sha256;
 
     use super::*;
-    use gg20::party_i::verify;
-    use gg20::state_machine::keygen::test::simulate_keygen;
+    use gg20::{party_i::verify, state_machine::keygen::test::simulate_keygen};
 
     fn simulate_offline_stage(
         local_keys: Vec<LocalKey<Secp256k1>>,
@@ -701,7 +775,8 @@ mod test {
             .map(|o| SignManual::new(message.clone(), o.clone()))
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
-        let (parties, local_sigs): (Vec<_>, Vec<_>) = parties.into_iter().unzip();
+        let (parties, local_sigs): (Vec<_>, Vec<_>) =
+            parties.into_iter().unzip();
         // parties.remove(0).complete(&local_sigs[1..]).unwrap();
         let local_sigs_except = |i: usize| {
             let mut v = vec![];
