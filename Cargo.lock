@@ -1008,6 +1008,7 @@ dependencies = [
  "hmac 0.11.0",
  "lazy_static",
  "merkle-cbt",
+ "num-bigint 0.4.6",
  "num-integer",
  "num-traits",
  "p256",
@@ -1370,7 +1371,7 @@ version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b24d4059bc0d0a0bf26b740aa21af1f96a984f0ab7a21356d00b32475388b53a"
 dependencies = [
- "num-bigint",
+ "num-bigint 0.2.6",
  "num-integer",
  "num-traits",
  "proc-macro2 1.0.95",
@@ -2492,7 +2493,7 @@ dependencies = [
 
 [[package]]
 name = "multi-party-ecdsa"
-version = "0.8.3"
+version = "0.8.4"
 dependencies = [
  "aes-gcm 0.9.2",
  "alloy-primitives",
@@ -2574,6 +2575,17 @@ dependencies = [
  "autocfg 1.4.0",
  "num-integer",
  "num-traits",
+]
+
+[[package]]
+name = "num-bigint"
+version = "0.4.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a5e44f723f1133c9deac646763579fdb3ac745e418f2a7af9cd0c431da1f20b9"
+dependencies = [
+ "num-integer",
+ "num-traits",
+ "serde",
 ]
 
 [[package]]
